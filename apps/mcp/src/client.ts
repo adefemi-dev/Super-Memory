@@ -57,6 +57,27 @@ export interface ProfileResponse {
 	searchResults?: SearchResult
 }
 
+// Context passed to a governance hook alongside the retrieved memories.
+export interface MemoryGovernanceContext {
+	containerTag?: string
+	query?: string
+}
+
+export type SearchGovernanceHook = (
+	result: SearchResult,
+	context: MemoryGovernanceContext,
+) => SearchResult | Promise<SearchResult>
+
+export type ProfileGovernanceHook = (
+	result: ProfileResponse,
+	context: MemoryGovernanceContext,
+) => ProfileResponse | Promise<ProfileResponse>
+
+export interface MemoryGovernanceHooks {
+	onSearch?: SearchGovernanceHook
+	onProfile?: ProfileGovernanceHook
+}
+
 export interface Project {
 	id: string
 	name: string
@@ -133,11 +154,13 @@ export class SupermemoryClient {
 	private hasExplicitContainerTag: boolean
 	private bearerToken: string
 	private apiUrl: string
+	private governance?: MemoryGovernanceHooks
 
 	constructor(
 		bearerToken: string,
 		containerTag?: string,
 		apiUrl = "https://api.supermemory.ai",
+		governance?: MemoryGovernanceHooks,
 	) {
 		this.bearerToken = bearerToken
 		this.apiUrl = apiUrl
@@ -148,6 +171,7 @@ export class SupermemoryClient {
 		})
 		this.hasExplicitContainerTag = Boolean(containerTag)
 		this.containerTag = containerTag || DEFAULT_PROJECT_ID
+		this.governance = governance
 	}
 
 	// Create memory using SDK
@@ -290,11 +314,20 @@ export class SupermemoryClient {
 				return { ...base, memory: text }
 			})
 
-			return {
+			const searchResult: SearchResult = {
 				results,
 				total: result.total,
 				timing: result.timing,
 			}
+
+			if (this.governance?.onSearch) {
+				return await this.governance.onSearch(searchResult, {
+					containerTag,
+					query,
+				})
+			}
+
+			return searchResult
 		} catch (error) {
 			this.handleOperationError("Search request", error)
 		}
@@ -342,6 +375,13 @@ export class SupermemoryClient {
 					total: result.searchResults.total,
 					timing: result.searchResults.timing,
 				}
+			}
+
+			if (this.governance?.onProfile) {
+				return await this.governance.onProfile(response, {
+					containerTag: this.containerTag,
+					query,
+				})
 			}
 
 			return response
