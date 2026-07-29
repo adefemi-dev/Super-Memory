@@ -604,20 +604,24 @@ export default function CompanyBrainConnections() {
 							isAdmin={isAdmin}
 							installHref={`${BACKEND}/brain/slack/oauth/install`}
 							onDisconnect={async () => {
-								const res = await fetch(`${BACKEND}/brain/slack/workspace`, {
-									method: "DELETE",
-									credentials: "include",
-								})
-								if (res.status === 403) {
-									toast.error("Only admins can disconnect Slack.")
-									return
-								}
-								if (!res.ok && res.status !== 404) {
+								try {
+									const res = await fetch(`${BACKEND}/brain/slack/workspace`, {
+										method: "DELETE",
+										credentials: "include",
+									})
+									if (res.status === 403) {
+										toast.error("Only admins can disconnect Slack.")
+										return
+									}
+									if (!res.ok && res.status !== 404) {
+										toast.error("Couldn't disconnect Slack.")
+										return
+									}
+									toast.success("Slack disconnected.")
+									await load()
+								} catch {
 									toast.error("Couldn't disconnect Slack.")
-									return
 								}
-								toast.success("Slack disconnected.")
-								await load()
 							}}
 						/>
 						{apps.map((entry) => (
