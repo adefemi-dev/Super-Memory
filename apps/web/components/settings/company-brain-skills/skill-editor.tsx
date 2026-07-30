@@ -242,66 +242,41 @@ export function SkillEditor({
 		<div
 			className={cn(
 				dmSans125ClassName(),
-				"relative flex flex-col gap-4 rounded-[14px] bg-[#14161A] p-5",
-				"shadow-[inset_2.42px_2.42px_4.263px_rgba(11,15,21,0.7)]",
+				"flex min-h-0 flex-1 flex-col bg-[#14161A]",
 			)}
 		>
-			<div className="flex flex-wrap items-center justify-between gap-3 border-white/[0.05] border-b pb-3">
-				<div className="min-w-0">
-					<p className="text-[13px] font-semibold text-[#FAFAFA]">
-						{draftKind === "upload"
-							? "Review uploaded skill"
-							: skill
-								? canManage
-									? "Edit skill"
-									: "View skill"
-								: "New skill"}
-					</p>
-					{draftKind === "upload" ? (
-						<p className="mt-0.5 text-[11px] text-[#687282]">Not saved yet</p>
-					) : null}
-				</div>
-				<div className="inline-flex rounded-full border border-white/[0.08] bg-[#0D0F14] p-0.5">
-					<button
-						type="button"
-						onClick={() => setPreview(false)}
-						className={cn(
-							"rounded-full px-3 py-1 text-[11px] transition-colors",
-							!preview ? "bg-white/[0.08] text-[#FAFAFA]" : "text-[#687282]",
-						)}
-					>
-						Write
-					</button>
-					<button
-						type="button"
-						onClick={() => setPreview(true)}
-						className={cn(
-							"rounded-full px-3 py-1 text-[11px] transition-colors",
-							preview ? "bg-white/[0.08] text-[#FAFAFA]" : "text-[#687282]",
-						)}
-					>
-						Preview
-					</button>
-				</div>
+			<div className="flex min-w-0 shrink-0 flex-col border-white/[0.05] border-b px-5 py-4 pr-14">
+				<p className="text-[13px] font-semibold text-[#FAFAFA]">
+					{draftKind === "upload"
+						? "Review uploaded skill"
+						: skill
+							? canManage
+								? "Edit skill"
+								: "View skill"
+							: "New skill"}
+				</p>
+				{draftKind === "upload" ? (
+					<p className="mt-0.5 text-[11px] text-[#687282]">Not saved yet</p>
+				) : null}
 			</div>
 
-			{!canManage ? (
-				<p className="rounded-[9px] border border-white/[0.07] bg-white/[0.025] px-3 py-2 text-[12px] text-[#8B929E]">
-					{skill?.scope === "personal"
-						? "Only this skill’s creator can edit or delete it. Admin access does not override personal ownership. You can still read the full playbook below."
-						: isAdmin
-							? "You can view this org-wide skill, but it cannot be edited or deleted in its current state."
-							: "Only admins and owners can edit or delete org-wide skills. You can still read the full playbook below."}
-				</p>
-			) : null}
-			{skill?.status === "disabled" ? (
-				<p className="rounded-[9px] border border-red-400/15 bg-red-400/[0.05] px-3 py-2 text-[12px] text-red-200">
-					This skill is disabled.
-					{skill.rejectionReason ? ` Reason: ${skill.rejectionReason}` : null}
-				</p>
-			) : null}
-			<div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
-				<label className="flex min-w-0 flex-col gap-1.5">
+			<div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4">
+				{!canManage ? (
+					<p className="rounded-[9px] border border-white/[0.07] bg-white/[0.025] px-3 py-2 text-[12px] text-[#8B929E]">
+						{skill?.scope === "personal"
+							? "Only this skill’s creator can edit or delete it. Admin access does not override personal ownership. You can still read the full playbook below."
+							: isAdmin
+								? "You can view this org-wide skill, but it cannot be edited or deleted in its current state."
+								: "Only admins and owners can edit or delete org-wide skills. You can still read the full playbook below."}
+					</p>
+				) : null}
+				{skill?.status === "disabled" ? (
+					<p className="rounded-[9px] border border-red-400/15 bg-red-400/[0.05] px-3 py-2 text-[12px] text-red-200">
+						This skill is disabled.
+						{skill.rejectionReason ? ` Reason: ${skill.rejectionReason}` : null}
+					</p>
+				) : null}
+				<label className="flex min-w-0 shrink-0 flex-col gap-1.5">
 					<span className={labelClass}>Name</span>
 					<input
 						value={draft.name}
@@ -312,101 +287,135 @@ export function SkillEditor({
 						className={cn(inputClass, "h-9")}
 					/>
 				</label>
-				<label className="flex min-w-0 flex-col gap-1.5">
-					<span className="flex items-center justify-between gap-2">
-						<span className={labelClass}>Description</span>
-						<span className="text-[10px] text-[#596270]">
-							{draft.description.length}/{SKILL_DESCRIPTION_MAX_LENGTH}
-						</span>
-					</span>
-					<input
-						value={draft.description}
-						onChange={(event) => set("description", event.target.value)}
-						readOnly={!canManage}
-						disabled={busy}
-						maxLength={SKILL_DESCRIPTION_MAX_LENGTH}
-						placeholder="When should the brain use this playbook?"
-						className={cn(inputClass, "h-9")}
-					/>
-				</label>
-			</div>
 
-			<div className="flex flex-col gap-1.5">
-				<span className="flex items-center justify-between gap-2">
-					<span className={labelClass}>Instructions (Markdown)</span>
-					<span
-						className={cn(
-							"text-[10px]",
-							bodyBytes > SKILL_BODY_MAX_LENGTH
-								? "text-red-300"
-								: "text-[#596270]",
-						)}
-					>
-						{Math.ceil(bodyBytes / 1024)} / 16 KB
-					</span>
-				</span>
-				{preview || !canManage ? (
-					<MarkdownPreview body={draft.body} />
-				) : (
-					<textarea
-						value={draft.body}
-						onChange={(event) => set("body", event.target.value)}
-						disabled={busy}
-						maxLength={SKILL_BODY_MAX_LENGTH}
-						spellCheck={false}
-						placeholder="# Process\n\nDescribe the steps, format, and voice to follow."
-						className="min-h-[280px] w-full resize-y rounded-[10px] border border-white/[0.08] bg-[#0D0F14] px-4 py-3 font-mono text-[12px] leading-5 text-[#D3D8E0] outline-none transition-colors focus:border-white/[0.16] disabled:opacity-50"
-					/>
-				)}
-			</div>
-
-			{canManage ? (
-				<div className="flex flex-col gap-2">
-					<span className={labelClass}>Who can use it</span>
-					<div className="flex flex-wrap gap-2">
-						<ScopeButton
-							value="personal"
-							label="Personal"
-							icon={<UserRound className="size-3.5" />}
-							selected={draft.scope === "personal"}
-							disabled={!canSelectScope("personal") || busy}
-							onSelect={(scope) => {
-								resetErrors()
-								setDraft((current) => setSkillDraftScope(current, scope))
-							}}
-						/>
-						{showSharedScopeOptions ? (
+				{canManage ? (
+					<div className="flex shrink-0 flex-col gap-2">
+						<span className={labelClass}>Who can use it</span>
+						<div className="flex flex-wrap gap-2">
 							<ScopeButton
-								value="org"
-								label="Org-wide"
-								icon={<Building2 className="size-3.5" />}
-								selected={draft.scope === "org"}
-								disabled={!canSelectScope("org") || busy}
+								value="personal"
+								label="Personal"
+								icon={<UserRound className="size-3.5" />}
+								selected={draft.scope === "personal"}
+								disabled={!canSelectScope("personal") || busy}
 								onSelect={(scope) => {
 									resetErrors()
 									setDraft((current) => setSkillDraftScope(current, scope))
 								}}
 							/>
+							{showSharedScopeOptions ? (
+								<ScopeButton
+									value="org"
+									label="Org-wide"
+									icon={<Building2 className="size-3.5" />}
+									selected={draft.scope === "org"}
+									disabled={!canSelectScope("org") || busy}
+									onSelect={(scope) => {
+										resetErrors()
+										setDraft((current) => setSkillDraftScope(current, scope))
+									}}
+								/>
+							) : null}
+						</div>
+						{scopePermissionCopy ? (
+							<p className="text-[11px] leading-5 text-[#687282]">
+								{scopePermissionCopy}
+							</p>
 						) : null}
 					</div>
-					{scopePermissionCopy ? (
-						<p className="text-[11px] leading-5 text-[#687282]">
-							{scopePermissionCopy}
-						</p>
-					) : null}
-				</div>
-			) : null}
+				) : null}
 
-			{visibleError ? (
-				<div
-					role="alert"
-					className="rounded-[9px] border border-red-400/15 bg-red-400/[0.05] px-3 py-2 text-[12px] text-red-300"
-				>
-					{visibleError}
-				</div>
-			) : null}
+				<label className="flex min-w-0 shrink-0 flex-col gap-1.5">
+					<span className="flex items-center justify-between gap-2">
+						<span className={labelClass}>Description</span>
+						<span className="text-[10px] text-[#596270]">
+							{draft.description.length} / {SKILL_DESCRIPTION_MAX_LENGTH}
+						</span>
+					</span>
+					<textarea
+						value={draft.description}
+						onChange={(event) => set("description", event.target.value)}
+						readOnly={!canManage}
+						disabled={busy}
+						maxLength={SKILL_DESCRIPTION_MAX_LENGTH}
+						rows={3}
+						placeholder="When should the brain use this playbook?"
+						className={cn(inputClass, "resize-y py-2 leading-5")}
+					/>
+				</label>
 
-			<div className="flex flex-wrap items-center justify-between gap-3 border-white/[0.05] border-t pt-3">
+				<div className="flex min-h-0 flex-1 flex-col gap-1.5">
+					<div className="flex items-center justify-between gap-2">
+						<span className={labelClass}>Instructions (Markdown)</span>
+						<div className="flex items-center gap-2">
+							<span
+								className={cn(
+									"text-[10px]",
+									bodyBytes > SKILL_BODY_MAX_LENGTH
+										? "text-red-300"
+										: "text-[#596270]",
+								)}
+							>
+								{Math.ceil(bodyBytes / 1024)} / 16 KB
+							</span>
+							{canManage ? (
+								<div className="inline-flex rounded-full border border-white/[0.08] bg-[#0D0F14] p-0.5">
+									<button
+										type="button"
+										onClick={() => setPreview(false)}
+										className={cn(
+											"rounded-full px-3 py-1 text-[11px] transition-colors",
+											!preview
+												? "bg-white/[0.08] text-[#FAFAFA]"
+												: "text-[#687282]",
+										)}
+									>
+										Write
+									</button>
+									<button
+										type="button"
+										onClick={() => setPreview(true)}
+										className={cn(
+											"rounded-full px-3 py-1 text-[11px] transition-colors",
+											preview
+												? "bg-white/[0.08] text-[#FAFAFA]"
+												: "text-[#687282]",
+										)}
+									>
+										Preview
+									</button>
+								</div>
+							) : null}
+						</div>
+					</div>
+					{preview || !canManage ? (
+						<MarkdownPreview body={draft.body} />
+					) : (
+						<textarea
+							value={draft.body}
+							onChange={(event) => set("body", event.target.value)}
+							disabled={busy}
+							maxLength={SKILL_BODY_MAX_LENGTH}
+							spellCheck={false}
+							placeholder={
+								"# Process\n\nDescribe the steps, format, and voice to follow."
+							}
+							className="min-h-[240px] w-full flex-1 resize-y rounded-[10px] border border-white/[0.08] bg-[#0D0F14] px-4 py-3 font-mono text-[12px] leading-5 text-[#D3D8E0] outline-none transition-colors focus:border-white/[0.16] disabled:opacity-50"
+						/>
+					)}
+				</div>
+
+				{visibleError ? (
+					<div
+						role="alert"
+						className="shrink-0 rounded-[9px] border border-red-400/15 bg-red-400/[0.05] px-3 py-2 text-[12px] text-red-300"
+					>
+						{visibleError}
+					</div>
+				) : null}
+			</div>
+
+			<div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-white/[0.05] border-t px-5 py-4">
 				<div>
 					{canDelete ? (
 						<button

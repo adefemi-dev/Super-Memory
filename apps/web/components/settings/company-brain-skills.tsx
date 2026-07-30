@@ -12,6 +12,12 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 } from "@ui/components/alert-dialog"
+import {
+	Sheet,
+	SheetContent,
+	SheetDescription,
+	SheetTitle,
+} from "@ui/components/sheet"
 import { FileUp, Loader2, Plus, RotateCcw } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
@@ -26,14 +32,29 @@ import {
 	parseSkillMarkdown,
 	skillDraftForRole,
 	type SkillDraft,
+	type SkillScope,
 } from "./company-brain-skills/domain"
-import { SkillCard } from "./company-brain-skills/skill-card"
 import { SkillEditor } from "./company-brain-skills/skill-editor"
+import { SkillRow } from "./company-brain-skills/skill-row"
 
-type UnsavedDraft = {
-	key: number
-	kind: "new" | "upload"
-	draft: SkillDraft
+type EditorTarget =
+	| { mode: "existing"; skillId: string }
+	| { mode: "new" | "upload"; key: number; draft: SkillDraft }
+
+type PendingIntent = { type: "close" } | { type: "open"; target: EditorTarget }
+
+type ScopeFilter = "all" | "org" | "personal"
+
+const SCOPE_HINTS: Record<ScopeFilter, string> = {
+	all: "Org-wide skills are shared with the workspace and managed by admins and owners. Personal skills stay private to you.",
+	org: "Shared with the workspace and managed by admins and owners.",
+	personal: "Private to you and managed only by you.",
+}
+
+const EMPTY_MESSAGES: Record<ScopeFilter, string> = {
+	all: "No skills yet. Create one or upload a .md playbook to get started.",
+	org: "No org-wide skills yet.",
+	personal: "No personal skills yet.",
 }
 
 function draftFromSkill(skill: BrainSkill): SkillDraft {
@@ -88,14 +109,15 @@ function CompanyBrainSkillsContent({
 }) {
 	const skillsQuery = useBrainSkills()
 	const upload = useUploadBrainSkill()
-	const [openId, setOpenId] = useState<string | null>(null)
-	const [openSkillDirty, setOpenSkillDirty] = useState(false)
-	const [pendingOpenId, setPendingOpenId] = useState<string | null>(null)
-	const [drafts, setDrafts] = useState<UnsavedDraft[]>([])
+	const [editing, setEditing] = useState<EditorTarget | null>(null)
+	const [editorDirty, setEditorDirty] = useState(false)
+	const [pending, setPending] = useState<PendingIntent | null>(null)
+	const [scopeFilter, setScopeFilter] = useState<ScopeFilter>("all")
 	const [uploadError, setUploadError] = useState<string | null>(null)
 	const fileInput = useRef<HTMLInputElement>(null)
 	const draftKey = useRef(0)
-	const hasUnsavedChanges = openSkillDirty || drafts.length > 0
+	// An uploaded draft holds real content the user hasn't saved, so it guards too.
+	const hasUnsavedChanges = editorDirty || editing?.mode === "upload"
 
 	useEffect(() => {
 		onUnsavedChangesChange?.(hasUnsavedChanges)
@@ -111,37 +133,41 @@ function CompanyBrainSkillsContent({
 	const data = skillsQuery.data
 	const viewerId = data?.viewerId ?? userId
 	const isAdmin = data?.isAdmin ?? false
-	const addDraft = (kind: UnsavedDraft["kind"], draft: SkillDraft) => {
-		setDrafts((current) => [
-			...current,
-			{
-				key: draftKey.current++,
-				kind,
-				draft: skillDraftForRole(draft, isAdmin),
-			},
-		])
+	const openEditor = (target: EditorTarget) => {
+		setEditing(target)
+		setEditorDirty(false)
 	}
-	const removeDraft = (key: number) => {
-		setDrafts((current) => current.filter((item) => item.key !== key))
+	const closeEditor = () => {
+		setEditing(null)
+		setEditorDirty(false)
+		setPending(null)
 	}
-	const closeOpenSkill = () => {
-		setOpenId(null)
-		setOpenSkillDirty(false)
-		setPendingOpenId(null)
-	}
-	const requestOpenSkill = (skillId: string) => {
-		if (openId && openId !== skillId && openSkillDirty) {
-			setPendingOpenId(skillId)
+	const requestOpen = (target: EditorTarget) => {
+		if (editing && hasUnsavedChanges) {
+			setPending({ type: "open", target })
 			return
 		}
-		setOpenId(skillId)
-		setOpenSkillDirty(false)
+		openEditor(target)
 	}
-	const confirmOpenSkill = () => {
-		if (!pendingOpenId) return
-		setOpenId(pendingOpenId)
-		setOpenSkillDirty(false)
-		setPendingOpenId(null)
+	const requestClose = () => {
+		if (editing && hasUnsavedChanges) {
+			setPending({ type: "close" })
+			return
+		}
+		closeEditor()
+	}
+	const confirmPending = () => {
+		if (!pending) return
+		if (pending.type === "close") closeEditor()
+		else openEditor(pending.target)
+		setPending(null)
+	}
+	const openDraft = (kind: "new" | "upload", draft: SkillDraft) => {
+		requestOpen({
+			mode: kind,
+			key: draftKey.current++,
+			draft: skillDraftForRole(draft, isAdmin),
+		})
 	}
 
 	const onUpload = async (file: File | undefined) => {
@@ -158,7 +184,7 @@ function CompanyBrainSkillsContent({
 			// the same validation and remains authoritative before the draft opens.
 			const local = parseSkillMarkdown(content)
 			const result = await upload.mutateAsync(content)
-			addDraft("upload", uploadedDraft(local, result.draft))
+			openDraft("upload", uploadedDraft(local, result.draft))
 			toast.success("Skill file is ready to review.")
 		} catch (error) {
 			setUploadError(errorMessage(error, "Couldn't read this skill file."))
@@ -171,91 +197,30 @@ function CompanyBrainSkillsContent({
 	const personalSkills = (data?.skills ?? []).filter(
 		(skill) => skill.scope === "personal" && skill.creatorUserId === viewerId,
 	)
-	const orgDrafts = drafts.filter((draft) => draft.draft.scope === "org")
-	const personalDrafts = drafts.filter(
-		(draft) => draft.draft.scope === "personal",
-	)
-	const renderSkill = (skill: BrainSkill) =>
-		openId === skill.id ? (
-			<div key={skill.id} className="sm:col-span-2 lg:col-span-3">
-				<SkillEditor
-					key={`${skill.id}:${skill.version}:${skill.updatedAt}`}
-					skill={skill}
-					initialDraft={draftFromSkill(skill)}
-					isAdmin={isAdmin}
-					viewerId={viewerId}
-					onClose={closeOpenSkill}
-					onDirtyChange={setOpenSkillDirty}
-				/>
-			</div>
-		) : (
-			<SkillCard
-				key={skill.id}
-				skill={skill}
-				onOpen={() => requestOpenSkill(skill.id)}
-			/>
-		)
-	const renderDraft = ({ key, kind, draft }: UnsavedDraft) => (
-		<div key={key} className="sm:col-span-2 lg:col-span-3">
-			<SkillEditor
-				skill={null}
-				initialDraft={draft}
-				isAdmin={isAdmin}
-				viewerId={viewerId}
-				draftKind={kind}
-				createOrigin={kind === "upload" ? "upload" : "web"}
-				onClose={() => removeDraft(key)}
-			/>
-		</div>
+	const visibleSkills =
+		scopeFilter === "org"
+			? orgSkills
+			: scopeFilter === "personal"
+				? personalSkills
+				: [...orgSkills, ...personalSkills]
+	const newSkillScope: SkillScope =
+		scopeFilter === "org" && isAdmin ? "org" : "personal"
+	const target = editing
+	const editingSkill =
+		target?.mode === "existing"
+			? ((data?.skills ?? []).find((skill) => skill.id === target.skillId) ??
+				null)
+			: null
+	const renderSkill = (skill: BrainSkill) => (
+		<SkillRow
+			key={skill.id}
+			skill={skill}
+			onOpen={() => requestOpen({ mode: "existing", skillId: skill.id })}
+		/>
 	)
 
 	return (
-		<section className={cn(dmSans125ClassName(), "flex flex-col gap-3 px-1")}>
-			<div className="flex justify-end">
-				<div>
-					<input
-						ref={fileInput}
-						type="file"
-						accept=".md,text/markdown,text/plain"
-						hidden
-						onChange={(event) => {
-							const file = event.currentTarget.files?.[0]
-							event.currentTarget.value = ""
-							void onUpload(file)
-						}}
-					/>
-					<button
-						type="button"
-						disabled={upload.isPending}
-						onClick={() => fileInput.current?.click()}
-						className="inline-flex h-9 items-center gap-2 rounded-full border border-white/[0.09] px-4 text-[12px] font-medium text-[#9AA3B2] transition-colors hover:bg-white/[0.04] hover:text-[#FAFAFA] disabled:cursor-not-allowed disabled:opacity-45"
-					>
-						{upload.isPending ? (
-							<Loader2 className="size-4 animate-spin" />
-						) : (
-							<FileUp className="size-4" />
-						)}
-						{upload.isPending ? "Reading…" : "Upload .md"}
-					</button>
-				</div>
-			</div>
-
-			{uploadError ? (
-				<div
-					role="alert"
-					className="flex items-center justify-between gap-3 rounded-[9px] border border-red-400/15 bg-red-400/[0.05] px-3 py-2 text-[12px] text-red-300"
-				>
-					<span>{uploadError}</span>
-					<button
-						type="button"
-						onClick={() => setUploadError(null)}
-						className="shrink-0 text-[11px] text-red-200 hover:text-white"
-					>
-						Dismiss
-					</button>
-				</div>
-			) : null}
-
+		<section className={cn(dmSans125ClassName(), "flex flex-col gap-3")}>
 			{skillsQuery.isLoading ? (
 				<div className="flex min-h-32 items-center justify-center gap-2 text-[13px] text-[#7E8794]">
 					<Loader2 className="size-4 animate-spin" /> Loading skills…
@@ -284,106 +249,194 @@ function CompanyBrainSkillsContent({
 					</button>
 				</div>
 			) : (
-				<div className="flex flex-col gap-7">
-					<section
-						aria-labelledby="org-skills-heading"
-						className="flex flex-col gap-3"
-					>
-						<div>
-							<h3
-								id="org-skills-heading"
-								className="text-[13px] font-semibold text-[#E5E7EB]"
-							>
-								Org-wide skills
-							</h3>
-							<p className="mt-0.5 text-[11px] text-[#596270]">
-								Shared with the workspace and managed by admins and owners.
-							</p>
+				<div className="flex flex-col gap-3">
+					<div className="flex flex-wrap items-center justify-between gap-3">
+						<div
+							role="tablist"
+							aria-label="Filter skills by scope"
+							className="flex items-center gap-0.5 rounded-full bg-white/[0.04] p-0.5"
+						>
+							{(
+								[
+									{
+										id: "all",
+										label: "All",
+										count: orgSkills.length + personalSkills.length,
+									},
+									{ id: "org", label: "Org-wide", count: orgSkills.length },
+									{
+										id: "personal",
+										label: "Personal",
+										count: personalSkills.length,
+									},
+								] as const
+							).map((tab) => (
+								<button
+									key={tab.id}
+									type="button"
+									role="tab"
+									aria-selected={scopeFilter === tab.id}
+									onClick={() => setScopeFilter(tab.id)}
+									className={cn(
+										"inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-[12px] font-medium transition-colors",
+										scopeFilter === tab.id
+											? "bg-white/[0.09] text-[#FAFAFA]"
+											: "text-[#8B929E] hover:text-[#FAFAFA]",
+									)}
+								>
+									{tab.label}
+									{tab.count > 0 ? (
+										<span className="tabular-nums text-[11px] text-[#6B7482]">
+											{tab.count}
+										</span>
+									) : null}
+								</button>
+							))}
 						</div>
-						{orgSkills.length > 0 || orgDrafts.length > 0 || isAdmin ? (
-							<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-								{orgSkills.map(renderSkill)}
-								{orgDrafts.map(renderDraft)}
-								{isAdmin ? (
-									<button
-										type="button"
-										onClick={() =>
-											addDraft("new", {
-												...emptySkillDraft(),
-												scope: "org",
-											})
-										}
-										className={cn(
-											dmSans125ClassName(),
-											"flex min-h-[150px] cursor-pointer items-center justify-center gap-2 rounded-xl border border-[#2A313C] border-dashed",
-											"text-[13px] font-medium text-[#737B87] transition-colors hover:border-[#3A4150] hover:text-[#FAFAFA]",
-										)}
-									>
-										<Plus className="size-4" /> New org-wide skill
-									</button>
-								) : null}
-							</div>
-						) : (
-							<p className="rounded-xl border border-white/[0.06] border-dashed px-4 py-6 text-center text-[12px] text-[#596270]">
-								No org-wide skills yet.
-							</p>
-						)}
-					</section>
 
-					<section
-						aria-labelledby="personal-skills-heading"
-						className="flex flex-col gap-3"
-					>
-						<div>
-							<h3
-								id="personal-skills-heading"
-								className="text-[13px] font-semibold text-[#E5E7EB]"
-							>
-								Personal skills
-							</h3>
-							<p className="mt-0.5 text-[11px] text-[#596270]">
-								Private to you and managed only by you.
-							</p>
-						</div>
-						<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-							{personalSkills.map(renderSkill)}
-							{personalDrafts.map(renderDraft)}
+						<div className="flex shrink-0 items-center gap-2">
+							<input
+								ref={fileInput}
+								type="file"
+								accept=".md,text/markdown,text/plain"
+								hidden
+								onChange={(event) => {
+									const file = event.currentTarget.files?.[0]
+									event.currentTarget.value = ""
+									void onUpload(file)
+								}}
+							/>
 							<button
 								type="button"
-								onClick={() => addDraft("new", emptySkillDraft())}
-								className={cn(
-									dmSans125ClassName(),
-									"flex min-h-[150px] cursor-pointer items-center justify-center gap-2 rounded-xl border border-[#2A313C] border-dashed",
-									"text-[13px] font-medium text-[#737B87] transition-colors hover:border-[#3A4150] hover:text-[#FAFAFA]",
-								)}
+								disabled={upload.isPending}
+								onClick={() => fileInput.current?.click()}
+								className="inline-flex h-8 items-center gap-2 rounded-full border border-white/[0.09] px-3.5 text-[12px] font-medium text-[#9AA3B2] transition-colors hover:bg-white/[0.04] hover:text-[#FAFAFA] disabled:cursor-not-allowed disabled:opacity-45"
 							>
-								<Plus className="size-4" /> New personal skill
+								{upload.isPending ? (
+									<Loader2 className="size-4 animate-spin" />
+								) : (
+									<FileUp className="size-4" />
+								)}
+								{upload.isPending ? "Reading…" : "Upload .md"}
+							</button>
+							<button
+								type="button"
+								onClick={() =>
+									openDraft("new", {
+										...emptySkillDraft(),
+										scope: newSkillScope,
+									})
+								}
+								className="inline-flex h-8 items-center gap-2 rounded-full bg-white/[0.09] px-3.5 text-[12px] font-medium text-[#FAFAFA] transition-colors hover:bg-white/[0.14]"
+							>
+								<Plus className="size-4" /> New skill
 							</button>
 						</div>
-					</section>
+					</div>
+
+					<p className="text-[11px] leading-5 text-[#596270]">
+						{SCOPE_HINTS[scopeFilter]}
+					</p>
+
+					{uploadError ? (
+						<div
+							role="alert"
+							className="flex items-center justify-between gap-3 rounded-[9px] border border-red-400/15 bg-red-400/[0.05] px-3 py-2 text-[12px] text-red-300"
+						>
+							<span>{uploadError}</span>
+							<button
+								type="button"
+								onClick={() => setUploadError(null)}
+								className="shrink-0 text-[11px] text-red-200 hover:text-white"
+							>
+								Dismiss
+							</button>
+						</div>
+					) : null}
+
+					{visibleSkills.length > 0 ? (
+						<div className="overflow-hidden rounded-xl border border-white/[0.06] bg-[#14161A]">
+							<div className="divide-y divide-white/[0.05]">
+								{visibleSkills.map(renderSkill)}
+							</div>
+						</div>
+					) : (
+						<p className="rounded-xl border border-white/[0.06] border-dashed px-4 py-5 text-center text-[12px] text-[#596270]">
+							{EMPTY_MESSAGES[scopeFilter]}
+						</p>
+					)}
 				</div>
 			)}
 
-			<AlertDialog
-				open={pendingOpenId !== null}
+			<Sheet
+				open={target !== null}
 				onOpenChange={(open) => {
-					if (!open) setPendingOpenId(null)
+					if (!open) requestClose()
+				}}
+			>
+				<SheetContent
+					side="right"
+					className="flex w-full flex-col gap-0 border-white/[0.06] bg-[#14161A] p-0 sm:max-w-[720px]"
+				>
+					<SheetTitle className="sr-only">Skill editor</SheetTitle>
+					<SheetDescription className="sr-only">
+						Edit the name, scope, description and Markdown instructions for this
+						skill.
+					</SheetDescription>
+					{target?.mode === "existing" ? (
+						editingSkill ? (
+							<SkillEditor
+								key={`${editingSkill.id}:${editingSkill.version}:${editingSkill.updatedAt}`}
+								skill={editingSkill}
+								initialDraft={draftFromSkill(editingSkill)}
+								isAdmin={isAdmin}
+								viewerId={viewerId}
+								onClose={closeEditor}
+								onDirtyChange={setEditorDirty}
+							/>
+						) : (
+							<p className="p-5 text-[13px] text-[#8B929E]">
+								This skill is no longer available.
+							</p>
+						)
+					) : target ? (
+						<SkillEditor
+							key={target.key}
+							skill={null}
+							initialDraft={target.draft}
+							isAdmin={isAdmin}
+							viewerId={viewerId}
+							draftKind={target.mode}
+							createOrigin={target.mode === "upload" ? "upload" : "web"}
+							onClose={closeEditor}
+							onDirtyChange={setEditorDirty}
+						/>
+					) : null}
+				</SheetContent>
+			</Sheet>
+
+			<AlertDialog
+				open={pending !== null}
+				onOpenChange={(open) => {
+					if (!open) setPending(null)
 				}}
 			>
 				<AlertDialogContent className="border-white/[0.08] bg-[#191D24] text-[#FAFAFA]">
 					<AlertDialogHeader>
 						<AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle>
 						<AlertDialogDescription className="text-[#8B929E]">
-							Opening another skill will discard the edits in this skill.
+							{pending?.type === "open"
+								? "Opening another skill will discard the edits in this skill."
+								: "Closing the editor will discard the edits in this skill."}
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>
 						<AlertDialogCancel>Keep editing</AlertDialogCancel>
 						<AlertDialogAction
-							onClick={confirmOpenSkill}
+							onClick={confirmPending}
 							className="bg-red-600 text-white hover:bg-red-500"
 						>
-							Discard and open
+							{pending?.type === "open" ? "Discard and open" : "Discard"}
 						</AlertDialogAction>
 					</AlertDialogFooter>
 				</AlertDialogContent>
