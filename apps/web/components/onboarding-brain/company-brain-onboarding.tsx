@@ -4,7 +4,14 @@ import { LogoFull } from "@ui/assets/Logo"
 import { Button } from "@ui/components/button"
 import { Input } from "@ui/components/input"
 import { cn } from "@lib/utils"
-import { ArrowRight, Check, Globe, Loader2 } from "lucide-react"
+import {
+	ArrowRight,
+	Building2,
+	Check,
+	ChevronRight,
+	Globe,
+	Loader2,
+} from "lucide-react"
 import { useQueryClient } from "@tanstack/react-query"
 import { AnimatePresence, motion } from "motion/react"
 import { type ReactNode, useEffect, useRef, useState } from "react"
@@ -25,6 +32,7 @@ import {
 import { ResearchActionRail } from "./research-action-rail"
 import {
 	type CompanyBrainConfirmResult,
+	type CompanyBrainOrganizationChoice,
 	workspaceNameFromDomain,
 } from "./types"
 
@@ -33,8 +41,12 @@ interface CompanyBrainOnboardingProps {
 	avatarUrl: string | null
 	domain: string
 	submitting: boolean
-	onConfirm: (domain: string) => Promise<CompanyBrainConfirmResult>
+	onConfirm: (
+		domain: string,
+		organizationId?: string,
+	) => Promise<CompanyBrainConfirmResult>
 	onDone: () => void
+	onUsePersonal: () => void
 }
 
 const BACKEND =
@@ -67,20 +79,33 @@ export function CompanyBrainOnboarding({
 	submitting,
 	onConfirm,
 	onDone,
+	onUsePersonal,
 }: CompanyBrainOnboardingProps) {
 	const [phase, setPhase] = useState<Phase>("confirm")
 	const [domain, setDomain] = useState(initialDomain)
+	const [organizationChoices, setOrganizationChoices] = useState<
+		CompanyBrainOrganizationChoice[] | null
+	>(null)
 	const [serverSchedulesResearch, setServerSchedulesResearch] = useState(false)
 	const firstName = name.trim().split(/\s+/)[0] ?? ""
 	const clean = normalizeDomain(domain)
 	const queryClient = useQueryClient()
 	const { status: researchStatus } = useResearchStatus(phase === "research")
 	const researchDone = researchStatus === "done"
+	// One-shot retry: re-kick research once on a terminal error.
+	const retryStage = useRef<"idle" | "started" | "rerunning" | "exhausted">(
+		"idle",
+	)
+	const [retryUi, setRetryUi] = useState<null | "retrying" | "exhausted">(null)
 
-	const handleConfirm = async () => {
+	const handleConfirm = async (organizationId?: string) => {
 		if (!clean || submitting) return
-		const result = await onConfirm(clean)
-		if (!result.ok) return
+		const result = await onConfirm(clean, organizationId)
+		if (!result.ok) {
+			if (result.choices?.length) setOrganizationChoices(result.choices)
+			return
+		}
+		setOrganizationChoices(null)
 		setServerSchedulesResearch(result.serverSchedulesResearch)
 		setPhase("research")
 	}
@@ -119,6 +144,48 @@ export function CompanyBrainOnboarding({
 		}, 40_000)
 		return () => window.clearTimeout(timer)
 	}, [phase, serverSchedulesResearch, clean, queryClient])
+
+	// "error" lingers a render after re-kicking, so only arm the second-error
+	// branch once the re-run is observed running.
+	useEffect(() => {
+		if (phase !== "research" || !clean) return
+		const stage = retryStage.current
+		if (researchStatus === "error" && stage === "idle") {
+			retryStage.current = "started"
+			setRetryUi("retrying")
+			void (async () => {
+				// A failed restart never reaches queued/running, and polling is off on
+				// error — without this the UI would say "retrying" forever.
+				const ok = await fetch(`${BACKEND}/brain/research/start`, {
+					method: "POST",
+					credentials: "include",
+					headers: {
+						"content-type": "application/json",
+						"X-App-Source": "nova",
+					},
+					body: JSON.stringify({ domain: clean }),
+				})
+					.then((res) => res.ok)
+					.catch(() => false)
+				if (!ok) {
+					retryStage.current = "exhausted"
+					setRetryUi("exhausted")
+					return
+				}
+				queryClient.invalidateQueries({ queryKey: ["brain-research-status"] })
+			})()
+		} else if (
+			(researchStatus === "queued" || researchStatus === "running") &&
+			stage === "started"
+		) {
+			retryStage.current = "rerunning"
+		} else if (researchStatus === "error" && stage === "rerunning") {
+			retryStage.current = "exhausted"
+			setRetryUi("exhausted")
+		} else if (researchStatus === "done") {
+			setRetryUi(null)
+		}
+	}, [phase, clean, researchStatus, queryClient])
 
 	return (
 		<div
@@ -162,15 +229,24 @@ export function CompanyBrainOnboarding({
 								exit={{ opacity: 0 }}
 								transition={{ duration: 0.15 }}
 							>
-								<ConfirmBody
-									firstName={firstName}
-									name={name}
-									avatarUrl={avatarUrl}
-									domain={domain}
-									onDomainChange={setDomain}
-									onConfirm={handleConfirm}
-									submitting={submitting}
-								/>
+								{organizationChoices ? (
+									<OrganizationChoiceBody
+										organizations={organizationChoices}
+										submitting={submitting}
+										onSelect={(organizationId) => handleConfirm(organizationId)}
+										onBack={() => setOrganizationChoices(null)}
+									/>
+								) : (
+									<ConfirmBody
+										firstName={firstName}
+										name={name}
+										avatarUrl={avatarUrl}
+										domain={domain}
+										onDomainChange={setDomain}
+										onConfirm={() => handleConfirm()}
+										submitting={submitting}
+									/>
+								)}
 							</motion.div>
 						) : (
 							<motion.div
@@ -182,6 +258,8 @@ export function CompanyBrainOnboarding({
 								<DockedHeader
 									domain={clean}
 									done={researchDone}
+									retrying={retryUi === "retrying"}
+									exhausted={retryUi === "exhausted"}
 									onContinue={onDone}
 								/>
 							</motion.div>
@@ -189,11 +267,19 @@ export function CompanyBrainOnboarding({
 					</AnimatePresence>
 				</motion.div>
 
-				{phase === "confirm" && (
-					<div className="w-full max-w-xl mx-auto mt-5 flex items-center justify-end px-1">
+				{phase === "confirm" && !organizationChoices && (
+					<div className="w-full max-w-xl mx-auto mt-5 flex items-center justify-between gap-4 px-1">
+						<button
+							type="button"
+							onClick={onUsePersonal}
+							disabled={submitting}
+							className="text-[13px] font-medium text-[#737373] transition-colors hover:text-[#fafafa] disabled:opacity-50"
+						>
+							Use a personal workspace instead
+						</button>
 						<Button
 							variant="insideOut"
-							onClick={handleConfirm}
+							onClick={() => handleConfirm()}
 							disabled={!clean || submitting}
 							className="rounded-full px-5 py-[10px] text-[13px] font-medium text-[#fafafa]"
 						>
@@ -238,6 +324,67 @@ export function CompanyBrainOnboarding({
 				</AnimatePresence>
 			</main>
 		</div>
+	)
+}
+
+function OrganizationChoiceBody({
+	organizations,
+	submitting,
+	onSelect,
+	onBack,
+}: {
+	organizations: CompanyBrainOrganizationChoice[]
+	submitting: boolean
+	onSelect: (organizationId: string) => void
+	onBack: () => void
+}) {
+	return (
+		<>
+			<div className="flex items-start gap-4">
+				<div className="flex size-12 shrink-0 items-center justify-center rounded-full border border-[rgba(82,89,102,0.2)] bg-[#14161A] text-[#4BA0FA]">
+					<Building2 className="size-5" />
+				</div>
+				<div>
+					<p className="text-[20px] font-semibold leading-tight text-[#FAFAFA]">
+						Choose your Company Brain
+					</p>
+					<p className="mt-1 text-[14px] font-medium leading-[1.4] text-[#737373]">
+						You already belong to more than one Company Brain workspace.
+					</p>
+				</div>
+			</div>
+			<div className="mt-6 flex flex-col gap-2">
+				{organizations.map((organization) => (
+					<button
+						key={organization.id}
+						type="button"
+						disabled={submitting}
+						onClick={() => onSelect(organization.id)}
+						className="flex w-full items-center gap-3 rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-3 text-left transition-colors hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4BA0FA] disabled:opacity-50"
+					>
+						<span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[#4BA0FA]/10 text-[#4BA0FA]">
+							<Building2 className="size-4" />
+						</span>
+						<span className="min-w-0 flex-1 truncate text-[14px] font-medium text-[#FAFAFA]">
+							{organization.name}
+						</span>
+						{submitting ? (
+							<Loader2 className="size-4 shrink-0 animate-spin text-[#8A94A6]" />
+						) : (
+							<ChevronRight className="size-4 shrink-0 text-[#8A94A6]" />
+						)}
+					</button>
+				))}
+			</div>
+			<button
+				type="button"
+				disabled={submitting}
+				onClick={onBack}
+				className="mt-4 text-[13px] font-medium text-[#737373] transition-colors hover:text-[#FAFAFA] disabled:opacity-50"
+			>
+				Use a different domain
+			</button>
+		</>
 	)
 }
 
@@ -307,13 +454,30 @@ function ConfirmBody({
 function DockedHeader({
 	domain,
 	done,
+	retrying,
+	exhausted,
 	onContinue,
 }: {
 	domain: string
 	done: boolean
+	retrying: boolean
+	exhausted: boolean
 	onContinue: () => void
 }) {
 	const brandName = workspaceNameFromDomain(domain) || domain
+	const showSpinner = !done && !exhausted
+	const statusLabel = done
+		? "Company Brain ready"
+		: exhausted
+			? "Couldn't finish — you can continue"
+			: retrying
+				? "Retrying research…"
+				: "Building your Company Brain…"
+	const statusColor = done
+		? "text-[#5CD68A]"
+		: exhausted
+			? "text-[#E5A45A]"
+			: "text-[#737373]"
 	return (
 		<div className="flex min-w-0 items-center gap-3">
 			<div
@@ -331,35 +495,35 @@ function DockedHeader({
 				</span>
 				<span
 					className={cn(
-						"shrink-0 whitespace-nowrap text-[12px] font-medium",
-						done ? "text-[#5CD68A]" : "text-[#737373]",
+						"flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[12px] font-medium",
+						statusColor,
 					)}
 				>
-					{done ? "Company Brain ready" : "Building your Company Brain…"}
+					{showSpinner && (
+						<Loader2 className="size-3 animate-spin text-[#4BA0FA]" />
+					)}
+					{statusLabel}
 				</span>
 			</div>
-			{done ? (
-				<Button
-					type="button"
-					onClick={onContinue}
-					className={cn(
-						"ml-auto shrink-0 rounded-full bg-white px-4 py-2 text-[13px] font-semibold text-[#1D1C1D] shadow-[0_4px_24px_rgba(75,160,250,0.25)] hover:bg-white/95",
-						dmSans125ClassName(),
-					)}
-				>
-					Continue
-					<ArrowRight className="size-3.5" />
-				</Button>
-			) : (
-				<Loader2 className="ml-auto size-3.5 shrink-0 animate-spin text-[#4BA0FA]" />
-			)}
+			{/* Never gated on research; the admin can move on while it keeps working. */}
+			<Button
+				type="button"
+				onClick={onContinue}
+				className={cn(
+					"ml-auto shrink-0 rounded-full bg-white px-4 py-2 text-[13px] font-semibold text-[#1D1C1D] shadow-[0_4px_24px_rgba(75,160,250,0.25)] hover:bg-white/95",
+					dmSans125ClassName(),
+				)}
+			>
+				Continue
+				<ArrowRight className="size-3.5" />
+			</Button>
 		</div>
 	)
 }
 
 function ResearchTranscript() {
 	const { status, events } = useResearchStatus()
-	const running = status !== "done"
+	const running = status !== "done" && status !== "error"
 	const scrollRef = useRef<HTMLDivElement>(null)
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: scroll on new events

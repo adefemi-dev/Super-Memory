@@ -801,7 +801,7 @@ export const SettingsRequestSchema = OrganizationSettingsSchema.omit({
 	id: true,
 	orgId: true,
 	updatedAt: true,
-})
+}).partial()
 
 export const ConnectionResponseSchema = z.object({
 	createdAt: z.string().datetime(),
@@ -1114,6 +1114,13 @@ export const DocumentsWithMemoriesQuerySchema = z
 			.openapi({
 				description: "Optional container tags to filter documents by",
 				example: ["sm_project_default"],
+			}),
+		sources: z
+			.array(z.string().trim().min(1).max(255))
+			.optional()
+			.openapi({
+				description: "Optional document sources to filter by (OR logic)",
+				example: ["claude-code", "codex"],
 			}),
 	})
 	.openapi({

@@ -59,4 +59,10 @@ export type IntegrationParamValue =
 export const categoriesParam = parseAsArrayOf(parseAsString, ",").withDefault(
 	[],
 )
+export const agentSourceParam = parseAsStringLiteral([
+	"claude-code",
+	"codex",
+	"opencode",
+	"cursor",
+] as const)
 export const projectParam = parseAsArrayOf(parseAsString, ",").withDefault([])

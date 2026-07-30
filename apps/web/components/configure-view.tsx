@@ -11,22 +11,38 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 } from "@ui/components/alert-dialog"
-import { Blocks, BookOpenText, CalendarClock, Cpu } from "lucide-react"
+import {
+	Blocks,
+	BookOpenText,
+	CalendarClock,
+	Cpu,
+	ScrollText,
+} from "lucide-react"
 import { useState } from "react"
 import CompanyBrainConnections from "@/components/settings/company-brain-connections"
 import CompanyBrainModels from "@/components/settings/company-brain-models"
+import CompanyBrainProactivity from "@/components/settings/company-brain-proactivity"
 import CompanyBrainSkills from "@/components/settings/company-brain-skills"
 import Proactiveness from "@/components/settings/proactiveness"
+import { ProactivenessIcon } from "@/components/settings/proactiveness-icon"
+import { WorkspacePrompt } from "@/components/settings/workspace-prompt"
 import { ErrorBoundary } from "@/components/error-boundary"
+import { useAuth } from "@lib/auth-context"
 import { dmSans125ClassName } from "@/lib/fonts"
 
-type ConfigureSection = "company-brain" | "models" | "automations" | "skills"
+type ConfigureSection =
+	| "company-brain"
+	| "models"
+	| "workspace-prompt"
+	| "proactivity"
+	| "automations"
+	| "skills"
 
 const SECTIONS: {
 	id: ConfigureSection
 	label: string
 	description: string
-	icon: typeof Blocks
+	icon: React.ComponentType<{ className?: string }>
 }[] = [
 	{
 		id: "company-brain",
@@ -41,6 +57,20 @@ const SECTIONS: {
 		description:
 			"Pick how fast or thorough your brain should be. Fine-tune each task under Advanced.",
 		icon: Cpu,
+	},
+	{
+		id: "workspace-prompt",
+		label: "Workspace Prompt",
+		description:
+			"Persistent guidance for how your brain works across the workspace. Fixed safety, access, and approval constraints still apply.",
+		icon: ScrollText,
+	},
+	{
+		id: "proactivity",
+		label: "Proactivity",
+		description:
+			"When Company Brain speaks up in Slack without being asked. Quiet channels are still read and remembered.",
+		icon: ProactivenessIcon,
 	},
 	{
 		id: "automations",
@@ -59,6 +89,7 @@ const SECTIONS: {
 ]
 
 export function ConfigureView() {
+	const { org } = useAuth()
 	const [activeSection, setActiveSection] =
 		useState<ConfigureSection>("company-brain")
 	const [skillsDirty, setSkillsDirty] = useState(false)
@@ -84,16 +115,13 @@ export function ConfigureView() {
 
 	return (
 		<div
-			className={cn(
-				dmSans125ClassName(),
-				"mx-auto flex min-h-full w-full max-w-[88rem] flex-col",
-			)}
+			className={cn(dmSans125ClassName(), "flex min-h-full w-full flex-col")}
 		>
 			<section
 				aria-label="Configure Company Brain"
 				className="flex flex-1 flex-col rounded-[14px] bg-[#191D24] p-4 shadow-[inset_2.42px_2.42px_4.263px_rgba(11,15,21,0.7)] sm:p-6"
 			>
-				<div className="flex flex-1 flex-col gap-5 md:flex-row md:gap-8">
+				<div className="mx-auto flex w-full max-w-[88rem] flex-1 flex-col gap-5 md:flex-row md:gap-8">
 					<nav
 						aria-label="Configure sections"
 						className="scrollbar-none flex shrink-0 gap-1 overflow-x-auto md:w-52 md:flex-col md:overflow-x-visible"
@@ -154,6 +182,10 @@ export function ConfigureView() {
 								<CompanyBrainConnections />
 							) : activeSection === "models" ? (
 								<CompanyBrainModels showHeading={false} />
+							) : activeSection === "workspace-prompt" ? (
+								<WorkspacePrompt key={org?.id} showHeading={false} />
+							) : activeSection === "proactivity" ? (
+								<CompanyBrainProactivity />
 							) : activeSection === "skills" ? (
 								<CompanyBrainSkills onUnsavedChangesChange={setSkillsDirty} />
 							) : (

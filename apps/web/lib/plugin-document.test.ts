@@ -14,6 +14,86 @@ function makeCodexSessionDocument(content: string): PluginDocumentInput {
 }
 
 describe("parsePluginDocument — session transcripts", () => {
+	it("keeps the Codex source badge inside a shared Agents container", () => {
+		const parsed = parsePluginDocument({
+			...makeCodexSessionDocument(
+				["[Session abc-123]", "1. [user] Shared memory"].join("\n"),
+			),
+			source: "codex",
+			containerTags: ["user_project_0123456789abcdef"],
+		} as unknown as PluginDocumentInput)
+
+		expect(parsed?.pluginLabel).toBe("Codex")
+		expect(parsed?.pluginIconSrc).toBe("/images/plugins/codex.png")
+	})
+
+	it("keeps the Claude Code source badge inside a shared Agents container", () => {
+		const parsed = parsePluginDocument({
+			id: "doc_claude",
+			title: "Claude memory",
+			content: "Remember this project convention",
+			source: "claude-code",
+			metadata: {
+				sm_source: "claude-code",
+				type: "manual",
+				project: "supermemory",
+			},
+			containerTags: ["repo_supermemory"],
+			memoryEntries: [],
+		} as unknown as PluginDocumentInput)
+
+		expect(parsed?.pluginLabel).toBe("Claude Code")
+		expect(parsed?.pluginIconSrc).toBe("/images/plugins/claude-code.svg")
+	})
+
+	it("renders a new Cursor capture as structured conversation cards", () => {
+		const parsed = parsePluginDocument({
+			id: "doc_cursor",
+			title: "Cursor conversation",
+			content: [
+				"[Conversation cursor-session-1]",
+				"1. [user] Keep the API boundary stable",
+				"2. [assistant] I will preserve it.",
+			].join("\n"),
+			source: "cursor",
+			metadata: { sm_source: "cursor", type: "conversation" },
+			containerTags: ["repo_supermemory__0123456789abcdef"],
+			memoryEntries: [],
+		} as unknown as PluginDocumentInput)
+
+		expect(parsed?.pluginLabel).toBe("Cursor")
+		expect(parsed?.pluginIconSrc).toBe("/images/plugins/cursor.png")
+		expect(parsed?.formatLabel).toBe("Conversation")
+		expect(parsed?.messages).toHaveLength(2)
+		expect(parsed?.messages[0]?.role).toBe("user")
+		expect(parsed?.messages[1]?.role).toBe("assistant")
+	})
+
+	it("renders old Cursor tags and transcripts without source metadata", () => {
+		const parsed = parsePluginDocument({
+			id: "doc_cursor_legacy",
+			title: "Cursor session",
+			content: [
+				"Cursor IDE session transcript:",
+				"User: Fix the renderer",
+				"with the existing card design.",
+				"Assistant: Implemented the parser.",
+			].join("\n"),
+			source: "api",
+			metadata: {},
+			containerTags: ["cursor_project_0123456789abcdef"],
+			memoryEntries: [],
+		} as unknown as PluginDocumentInput)
+
+		expect(parsed?.pluginLabel).toBe("Cursor")
+		expect(parsed?.pluginIconSrc).toBe("/images/plugins/cursor.png")
+		expect(parsed?.messages).toHaveLength(2)
+		expect(parsed?.messages[0]?.text).toBe(
+			"Fix the renderer\nwith the existing card design.",
+		)
+		expect(parsed?.messages[1]?.text).toBe("Implemented the parser.")
+	})
+
 	it("keeps multi-line message bodies intact", () => {
 		const parsed = parsePluginDocument(
 			makeCodexSessionDocument(
