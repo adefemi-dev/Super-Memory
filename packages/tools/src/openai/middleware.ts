@@ -1,7 +1,7 @@
 import type OpenAI from "openai"
 import Supermemory from "supermemory"
 import { addConversation } from "../conversations-client"
-import { deduplicateMemories } from "../shared"
+import { deduplicateMemoriesForMode } from "../tools-shared"
 import { createLogger, type Logger } from "../vercel/logger"
 import { convertProfileToMarkdown } from "../vercel/util"
 
@@ -12,7 +12,10 @@ const normalizeBaseUrl = (url?: string): string => {
 }
 
 export interface OpenAIMiddlewareOptions {
-	conversationId?: string
+	/** Container tag/identifier for memory search (e.g., user ID, project ID). Required. */
+	containerTag: string
+	/** Custom ID to group messages into a single document. Required. */
+	customId: string
 	verbose?: boolean
 	mode?: "profile" | "query" | "full"
 	addMemory?: "always" | "never"
@@ -181,7 +184,7 @@ const addSystemPrompt = async (
 		mode,
 	})
 
-	const deduplicated = deduplicateMemories({
+	const deduplicated = deduplicateMemoriesForMode(mode, {
 		static: memoriesResponse.profile.static,
 		dynamic: memoriesResponse.profile.dynamic,
 		searchResults: memoriesResponse.searchResults?.results,
@@ -338,11 +341,13 @@ const addMemoryTool = async (
 										text: (c as { type: "text"; text: string }).text,
 									}))
 							: "",
-				...((msg as any).name && { name: (msg as any).name }),
-				...((msg as any).tool_calls && { tool_calls: (msg as any).tool_calls }),
-				...((msg as any).tool_call_id && {
-					tool_call_id: (msg as any).tool_call_id,
-				}),
+				...("name" in msg && msg.name && { name: msg.name }),
+				...("tool_calls" in msg &&
+					msg.tool_calls && { tool_calls: msg.tool_calls }),
+				...("tool_call_id" in msg &&
+					msg.tool_call_id && {
+						tool_call_id: msg.tool_call_id,
+					}),
 			}))
 
 			const response = await addConversation({
@@ -355,7 +360,7 @@ const addMemoryTool = async (
 
 			logger.info("Conversation saved successfully via /v4/conversations", {
 				containerTag,
-				conversationId,
+				customId,
 				messageCount: messages.length,
 				responseId: response.id,
 			})
@@ -363,7 +368,7 @@ const addMemoryTool = async (
 		}
 
 		// Fallback to old behavior for non-conversation memories
-		const response = await client.memories.add({
+		const response = await client.add({
 			content,
 			containerTags: [containerTag],
 			customId,
@@ -391,17 +396,17 @@ const addMemoryTool = async (
  *
  * @param containerTag - The container tag/identifier for memory search (e.g., user ID, project ID)
  * @param options - Optional configuration options for the middleware
- * @param options.conversationId - Optional conversation ID to group messages for contextual memory generation
+ * @param options.customId - Optional conversation ID to group messages for contextual memory generation
  * @param options.verbose - Enable detailed logging of memory operations (default: false)
  * @param options.mode - Memory search mode: "profile" (all memories), "query" (search-based), or "full" (both) (default: "profile")
- * @param options.addMemory - Automatic memory storage mode: "always" or "never" (default: "never")
+ * @param options.addMemory - Automatic memory storage mode: "always" or "never" (default: "always")
  * @returns Object with `wrapClient` and `createClient` methods
  * @throws {Error} When SUPERMEMORY_API_KEY environment variable is not set
  *
  * @example
  * ```typescript
  * const openaiWithSupermemory = createOpenAIMiddleware(openai, "user-123", {
- *   conversationId: "conversation-456",
+ *   customId: "conversation-456",
  *   mode: "full",
  *   addMemory: "always",
  *   verbose: true
@@ -421,9 +426,9 @@ export function createOpenAIMiddleware(
 		...(baseUrl !== "https://api.supermemory.ai" ? { baseURL: baseUrl } : {}),
 	})
 
-	const conversationId = options?.conversationId
+	const customId = options?.customId
 	const mode = options?.mode ?? "profile"
-	const addMemory = options?.addMemory ?? "never"
+	const addMemory = options?.addMemory ?? "always"
 
 	const originalCreate = openaiClient.chat.completions.create
 	const originalResponsesCreate = openaiClient.responses?.create
@@ -466,7 +471,7 @@ export function createOpenAIMiddleware(
 			mode,
 		})
 
-		const deduplicated = deduplicateMemories({
+		const deduplicated = deduplicateMemoriesForMode(mode, {
 			static: memoriesResponse.profile.static,
 			dynamic: memoriesResponse.profile.dynamic,
 			searchResults: memoriesResponse.searchResults?.results,
@@ -534,20 +539,18 @@ export function createOpenAIMiddleware(
 
 		logger.info("Starting memory search for Responses API", {
 			containerTag,
-			conversationId,
+			customId,
 			mode,
 		})
 
-		const operations: Promise<any>[] = []
+		const operations: Promise<unknown>[] = []
 
 		if (addMemory === "always" && input?.trim()) {
-			const content = conversationId ? `Input: ${input}` : input
-			const customId = conversationId
-				? `conversation:${conversationId}`
-				: undefined
+			const content = customId ? `Input: ${input}` : input
+			const memoryCustomId = customId ? `conversation:${customId}` : undefined
 
 			operations.push(
-				addMemoryTool(client, containerTag, content, customId, logger),
+				addMemoryTool(client, containerTag, content, memoryCustomId, logger),
 			)
 		}
 
@@ -590,28 +593,26 @@ export function createOpenAIMiddleware(
 
 		logger.info("Starting memory search", {
 			containerTag,
-			conversationId,
+			customId,
 			mode,
 		})
 
-		const operations: Promise<any>[] = []
+		const operations: Promise<unknown>[] = []
 
 		if (addMemory === "always") {
 			const userMessage = getLastUserMessage(messages)
 			if (userMessage?.trim()) {
-				const content = conversationId
+				const content = customId
 					? getConversationContent(messages)
 					: userMessage
-				const customId = conversationId
-					? `conversation:${conversationId}`
-					: undefined
+				const memoryCustomId = customId ? `conversation:${customId}` : undefined
 
 				operations.push(
 					addMemoryTool(
 						client,
 						containerTag,
 						content,
-						customId,
+						memoryCustomId,
 						logger,
 						messages,
 						process.env.SUPERMEMORY_API_KEY,

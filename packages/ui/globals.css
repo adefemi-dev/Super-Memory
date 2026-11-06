@@ -1,6 +1,8 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @source "../../apps/**/*.tsx";
 @source "../../packages/**/*.tsx";
 
@@ -90,7 +92,7 @@
 	--shadow-offset-x: 0;
 	--shadow-offset-y: 1px;
 	--letter-spacing: -0.01em;
-	--spacing: 0.24rem;
+	--spacing: 0.25rem;
 	--shadow-2xs: 0 1px 3px 0px hsl(0 0% 0% / 0.02);
 	--shadow-xs: 0 1px 3px 0px hsl(0 0% 0% / 0.02);
 	--shadow-sm:
@@ -151,7 +153,7 @@
 	--shadow-offset-x: 0;
 	--shadow-offset-y: 1px;
 	--letter-spacing: -0.01em;
-	--spacing: 0.24rem;
+	--spacing: 0.25rem;
 	--shadow-2xs: 0 1px 3px 0px hsl(0 0% 0% / 0.02);
 	--shadow-xs: 0 1px 3px 0px hsl(0 0% 0% / 0.02);
 	--shadow-sm:
@@ -255,6 +257,20 @@
 	}
 	body {
 		@apply bg-background text-foreground;
+		font-size: 14px;
 		letter-spacing: var(--tracking-normal);
+	}
+
+	@media (max-width: 767px) {
+		input:not([type="button"]):not([type="checkbox"]):not([type="color"]):not(
+				[type="file"]
+			):not([type="hidden"]):not([type="image"]):not([type="radio"]):not(
+				[type="range"]
+			):not([type="reset"]):not([type="submit"]),
+		textarea,
+		select,
+		[contenteditable]:not([contenteditable="false"]) {
+			font-size: 16px !important;
+		}
 	}
 }

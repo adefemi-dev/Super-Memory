@@ -1,14 +1,14 @@
 """Supermemory tools for OpenAI function calling."""
 
 import json
-from typing import Dict, List, Optional, Union, TypedDict
+from typing import Dict, List, Optional, TypedDict, Union
 
+import supermemory
 from openai.types.chat import (
+    ChatCompletionFunctionToolParam,
     ChatCompletionMessageToolCall,
     ChatCompletionToolMessageParam,
-    ChatCompletionFunctionToolParam,
 )
-import supermemory
 from supermemory.types import (
     MemoryAddResponse,
     MemoryGetResponse,
@@ -125,7 +125,7 @@ class SupermemoryTools:
         if config.get("base_url"):
             client_kwargs["base_url"] = config["base_url"]
 
-        self.client = supermemory.Supermemory(**client_kwargs)
+        self.client = supermemory.AsyncSupermemory(**client_kwargs)
 
         # Set container tags
         if config.get("project_id"):
@@ -197,7 +197,7 @@ class SupermemoryTools:
 
             return MemorySearchResult(
                 success=True,
-                results=response.results,
+                results=[r.model_dump() for r in response.results],
                 count=len(response.results),
             )
         except (OSError, ConnectionError) as network_error:
@@ -221,20 +221,16 @@ class SupermemoryTools:
             MemoryAddResult
         """
         try:
-            metadata: Dict[str, object] = {}
-
             add_params = {
                 "content": memory,
                 "container_tags": self.container_tags,
             }
-            if metadata:
-                add_params["metadata"] = metadata
 
             response: MemoryAddResponse = await self.client.memories.add(**add_params)
 
             return MemoryAddResult(
                 success=True,
-                memory=response,
+                memory=response.model_dump(),
             )
         except (OSError, ConnectionError) as network_error:
             return MemoryAddResult(

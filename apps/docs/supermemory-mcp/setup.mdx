@@ -1,19 +1,16 @@
 ---
 title: 'Setup and Usage'
 description: 'How to set up and use Supermemory MCP Server 4.0'
+icon: 'settings'
 ---
 
-## Quick Install (Recommended)
+## Server URL
 
-```bash
-npx -y install-mcp@latest https://mcp.supermemory.ai/mcp --client claude --oauth=yes
+```text
+https://mcp.supermemory.ai/mcp
 ```
 
-Replace `claude` with your MCP client: `cursor`, `windsurf`, `vscode`, etc.
-
-## Manual Configuration
-
-Add this to your MCP client config (Claude Desktop, Cursor, Windsurf, etc.):
+Add this to your MCP client config (Claude, Cursor, Windsurf, VS Code, etc.):
 
 ```json
 {
@@ -25,26 +22,7 @@ Add this to your MCP client config (Claude Desktop, Cursor, Windsurf, etc.):
 }
 ```
 
-The server uses **OAuth authentication** by default. Your MCP client will automatically discover the authorization server via `/.well-known/oauth-protected-resource` and prompt you to authenticate.
-
-## API Key Authentication (Alternative)
-
-If you prefer to use an API key instead of OAuth, get one from [app.supermemory.ai](https://app.supermemory.ai) and pass it in the `Authorization` header:
-
-```json
-{
-  "mcpServers": {
-    "supermemory": {
-      "url": "https://mcp.supermemory.ai/mcp",
-      "headers": {
-        "Authorization": "Bearer sm_your_api_key_here"
-      }
-    }
-  }
-}
-```
-
-API keys start with `sm_` and are automatically detected. When an API key is provided, OAuth authentication is skipped.
+The server requires **OAuth authentication**. Your MCP client will automatically discover the authorization server via `/.well-known/oauth-protected-resource` and prompt you to authenticate.
 
 ## Project Scoping (Optional)
 
@@ -69,17 +47,7 @@ This keeps memories organized by project, useful when working on multiple codeba
 
 ### Claude Desktop
 
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
-
-```json
-{
-  "mcpServers": {
-    "supermemory": {
-      "url": "https://mcp.supermemory.ai/mcp"
-    }
-  }
-}
-```
+For a screenshot-backed walkthrough (Settings → Connectors → Add custom connector with the URL above), see **[Claude Desktop](/supermemory-mcp/claude-desktop)**.
 
 ### Cursor
 

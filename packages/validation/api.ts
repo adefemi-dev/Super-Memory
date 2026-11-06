@@ -157,6 +157,12 @@ export const MemoryUpdateSchema = z.object({
 			"Optional custom ID of the memory. This could be an ID from your database that will uniquely identify this memory.",
 		example: "mem_abc123",
 	}),
+	entityContext: z.string().max(1500).optional().openapi({
+		description:
+			"Context for memory extraction on this container tag. Helps guide how memories are extracted and understood.",
+		example:
+			"This user is John, saving items in a personal knowledge management system.",
+	}),
 	metadata: MetadataSchema.optional().openapi({
 		description:
 			"Optional metadata for the memory. This is used to store additional information about the memory. You can use this to store any additional information you need about the memory. Metadata can be filtered through. Keys must be strings and are case sensitive. Values can be strings, numbers, or booleans. You cannot nest objects.",
@@ -340,14 +346,13 @@ export const SearchRequestSchema = z.object({
 		.number()
 		.optional()
 		.default(0)
-		.refine((v) => v === undefined || (v >= 0 && v <= 1), {
+		.refine((v) => v >= 0 && v <= 1, {
 			message: "chunkThreshold must be between 0 and 1",
 			params: {
 				max: 1,
 				min: 0,
 			},
 		})
-		.transform(Number)
 		.openapi({
 			description:
 				"Threshold / sensitivity for chunk selection. 0 is least sensitive (returns most chunks, more results), 1 is most sensitive (returns lesser chunks, accurate results)",
@@ -372,14 +377,13 @@ export const SearchRequestSchema = z.object({
 		.number()
 		.optional()
 		.default(0)
-		.refine((v) => v === undefined || (v >= 0 && v <= 1), {
+		.refine((v) => v >= 0 && v <= 1, {
 			message: "documentThreshold must be between 0 and 1",
 			params: {
 				max: 1,
 				min: 0,
 			},
 		})
-		.transform(Number)
 		.openapi({
 			description:
 				"Threshold / sensitivity for document selection. 0 is least sensitive (returns most documents, more results), 1 is most sensitive (returns lesser documents, accurate results)",
@@ -467,14 +471,13 @@ export const Searchv4RequestSchema = z.object({
 		.number()
 		.optional()
 		.default(0.6)
-		.refine((v) => v === undefined || (v >= 0 && v <= 1), {
+		.refine((v) => v >= 0 && v <= 1, {
 			message: "documentThreshold must be between 0 and 1",
 			params: {
 				max: 1,
 				min: 0,
 			},
 		})
-		.transform(Number)
 		.openapi({
 			description:
 				"Threshold / sensitivity for memories selection. 0 is least sensitive (returns most memories, more results), 1 is most sensitive (returns lesser memories, accurate results)",
@@ -798,7 +801,7 @@ export const SettingsRequestSchema = OrganizationSettingsSchema.omit({
 	id: true,
 	orgId: true,
 	updatedAt: true,
-})
+}).partial()
 
 export const ConnectionResponseSchema = z.object({
 	createdAt: z.string().datetime(),
@@ -808,6 +811,7 @@ export const ConnectionResponseSchema = z.object({
 	id: z.string(),
 	metadata: z.record(z.any()).optional(),
 	provider: z.string(),
+	containerTags: z.array(z.string()).optional(),
 })
 
 export const RequestTypeSchema = RequestTypeEnum
@@ -1111,9 +1115,30 @@ export const DocumentsWithMemoriesQuerySchema = z
 				description: "Optional container tags to filter documents by",
 				example: ["sm_project_default"],
 			}),
+		sources: z
+			.array(z.string().trim().min(1).max(255))
+			.optional()
+			.openapi({
+				description: "Optional document sources to filter by (OR logic)",
+				example: ["claude-code", "codex"],
+			}),
 	})
 	.openapi({
 		description: "Query parameters for listing documents with memory entries",
+	})
+
+export const DocumentFacetsQuerySchema = z
+	.object({
+		containerTags: z
+			.array(z.string())
+			.optional()
+			.openapi({
+				description: "Optional container tags to filter facets by",
+				example: ["sm_project_default"],
+			}),
+	})
+	.openapi({
+		description: "Query parameters for getting document facets",
 	})
 
 export const MigrateMCPRequestSchema = z
@@ -1232,6 +1257,10 @@ export const ProjectSchema = z
 			description: "Number of documents in this project",
 			example: 42,
 		}),
+		emoji: z.string().optional().openapi({
+			description: "Emoji icon for the project",
+			example: "📁",
+		}),
 	})
 	.openapi({
 		description: "Project object for organizing memories",
@@ -1245,15 +1274,65 @@ export const CreateProjectSchema = z
 			minLength: 1,
 			maxLength: 100,
 		}),
+		emoji: z.string().max(10).optional().openapi({
+			description: "Emoji icon for the project",
+			example: "📁",
+			maxLength: 10,
+		}),
 	})
 	.openapi({
 		description: "Request body for creating a new project",
 	})
 
+export const ContainerTagSettingsUpdateSchema = z
+	.object({
+		containerTag: z.string().openapi({
+			description: "The container tag identifier",
+			example: "sm_project_default",
+		}),
+		name: z.string().nullable().openapi({
+			description: "Display name for this container tag",
+			example: "Research Notes",
+		}),
+		entityContext: z.string().nullable().openapi({
+			description: "Custom context prompt for this container tag",
+			example: "This project contains research papers about machine learning.",
+		}),
+		memoryFilesystemPaths: z.array(z.string()).nullable(),
+		updatedAt: z.string().datetime().openapi({
+			description: "Last update timestamp",
+			format: "datetime",
+		}),
+	})
+	.openapi({
+		description: "Response after updating container tag settings",
+	})
+
+export const UpdateContainerTagSettingsRequestSchema = z
+	.object({
+		name: z.string().trim().min(1).max(100).optional().openapi({
+			description:
+				"Display name for this container tag. This does not change the container tag identifier.",
+			example: "Research Notes",
+			minLength: 1,
+			maxLength: 100,
+		}),
+		entityContext: z.string().max(1500).nullable().optional().openapi({
+			description:
+				"Custom context prompt for this container tag. Used to provide additional context when processing documents in this container. Maximum 1500 characters.",
+			example: "This project contains research papers about machine learning.",
+			maxLength: 1500,
+		}),
+		memoryFilesystemPaths: z.array(z.string()).nullable().optional(),
+	})
+	.openapi({
+		description: "Request body for updating container tag settings",
+	})
+
 export const ListProjectsResponseSchema = z
 	.object({
 		projects: z.array(ProjectSchema).openapi({
-			description: "List of projects",
+			description: "List of user-created projects with sm_project_* prefix",
 		}),
 	})
 	.openapi({
@@ -1383,4 +1462,56 @@ export const BulkDeleteMemoriesResponseSchema = z
 	})
 	.openapi({
 		description: "Response for bulk memory deletion",
+	})
+
+export const ContainerTagListTypeSchema = z
+	.object({
+		id: z.string().openapi({
+			description: "Unique identifier of the container tag/space",
+			example: "space_abc123",
+		}),
+		name: z.string().openapi({
+			description: "Display name of the container tag",
+			example: "My Project",
+		}),
+		containerTag: z.string().openapi({
+			description: "The container tag identifier",
+			example: "sm_project_my_project",
+		}),
+		createdAt: z.string().openapi({
+			description: "Creation timestamp",
+			example: new Date().toISOString(),
+			format: "date-time",
+		}),
+		updatedAt: z.string().openapi({
+			description: "Last update timestamp",
+			example: new Date().toISOString(),
+			format: "date-time",
+		}),
+		isExperimental: z.boolean().openapi({
+			description: "Whether the space is experimental",
+			example: false,
+		}),
+		emoji: z.string().optional().openapi({
+			description: "Emoji icon for the container tag",
+			example: "📁",
+		}),
+		isNova: z.boolean().openapi({
+			description: "True if containerTag starts with 'sm_project_'",
+			example: true,
+		}),
+		visibility: z.enum(["public", "private", "unlisted"]).optional().openapi({
+			description: "Space visibility (company brain spaces)",
+			example: "public",
+		}),
+	})
+	.openapi({
+		description:
+			"Container tag with isNova flag indicating Nova vs developer project",
+	})
+
+export const ListContainerTagsResponseSchema = z
+	.array(ContainerTagListTypeSchema)
+	.openapi({
+		description: "Flat array of all container tags with isNova flag",
 	})

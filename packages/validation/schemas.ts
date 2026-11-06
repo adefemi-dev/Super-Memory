@@ -261,6 +261,7 @@ export const MemoryEntrySchema = z.object({
 	// Status flags
 	isInference: z.boolean().default(false),
 	isForgotten: z.boolean().default(false),
+	isStatic: z.boolean().default(false),
 	forgetAfter: z.coerce.date().nullable().optional(),
 	forgetReason: z.string().nullable().optional(),
 
@@ -314,6 +315,7 @@ export const OrganizationSettingsSchema = z.object({
 	filterPrompt: z.string().nullable().optional(),
 	includeItems: z.array(z.string()).nullable().optional(),
 	excludeItems: z.array(z.string()).nullable().optional(),
+	workspacePrompt: z.string().max(1500).nullable().optional(),
 
 	// Google Drive custom keys
 	googleDriveCustomKeyEnabled: z.boolean().default(false),

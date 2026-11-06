@@ -1,5 +1,5 @@
 import Supermemory from "supermemory"
-import { getContainerTags } from "./shared"
+import { getContainerTags } from "./tools-shared"
 import type { SupermemoryToolsConfig } from "./types"
 
 // Claude Memory Tool Types
@@ -47,17 +47,14 @@ export class ClaudeMemoryTool {
 	private memoryContainerPrefix: string
 
 	/**
-	 * Normalize file path to be used as customId (replace / with --)
+	 * Normalize file path to be used as customId
+	 * Converts /memories/file.txt -> memories_file_txt
 	 */
 	private normalizePathToCustomId(path: string): string {
-		return path.replace(/\//g, "--")
-	}
-
-	/**
-	 * Convert customId back to file path (replace -- with /)
-	 */
-	private customIdToPath(customId: string): string {
-		return customId.replace(/--/g, "/")
+		return path
+			.replace(/^\//, "") // Remove leading slash
+			.replace(/\//g, "_") // Replace / with _
+			.replace(/\./g, "_") // Replace . with _
 	}
 
 	constructor(apiKey: string, config?: ClaudeMemoryConfig) {
@@ -99,7 +96,10 @@ export class ClaudeMemoryTool {
 					}
 					return await this.create(command.path, command.file_text)
 				case "str_replace":
-					if (!command.old_str || !command.new_str) {
+					// new_str may legitimately be "" (deleting text), so only reject
+					// when it is missing entirely. old_str must be non-empty — replacing
+					// the empty string would prepend instead of replacing.
+					if (!command.old_str || command.new_str === undefined) {
 						return {
 							success: false,
 							error: "old_str and new_str are required for str_replace command",
@@ -111,7 +111,11 @@ export class ClaudeMemoryTool {
 						command.new_str,
 					)
 				case "insert":
-					if (command.insert_line === undefined || !command.insert_text) {
+					// insert_text may be "" (inserting a blank line).
+					if (
+						command.insert_line === undefined ||
+						command.insert_text === undefined
+					) {
 						return {
 							success: false,
 							error:
@@ -176,7 +180,7 @@ export class ClaudeMemoryTool {
 		// If path ends with / or is exactly /memories, it's a directory listing request
 		if (path.endsWith("/") || path === "/memories") {
 			// Normalize path to end with /
-			const dirPath = path.endsWith("/") ? path : path + "/"
+			const dirPath = path.endsWith("/") ? path : `${path}/`
 			return await this.listDirectory(dirPath)
 		}
 
@@ -221,7 +225,7 @@ export class ClaudeMemoryTool {
 				const slashIndex = relativePath.indexOf("/")
 				if (slashIndex > 0) {
 					// It's a subdirectory
-					dirs.add(relativePath.substring(0, slashIndex) + "/")
+					dirs.add(`${relativePath.substring(0, slashIndex)}/`)
 				} else if (relativePath !== "") {
 					// It's a file in this directory
 					files.push(relativePath)
@@ -258,35 +262,33 @@ export class ClaudeMemoryTool {
 		viewRange?: [number, number],
 	): Promise<MemoryResponse> {
 		try {
-			const normalizedId = this.normalizePathToCustomId(filePath)
-
-			const response = await this.client.search.execute({
-				q: normalizedId,
-				containerTags: this.containerTags,
-				limit: 1,
-				includeFullDocs: true,
-			})
-
-			// Try to find exact match by customId
-			const exactMatch = response.results?.find(
-				(r) => r.documentId === normalizedId,
-			)
-			const document = exactMatch || response.results?.[0]
-
-			if (!document) {
+			// Same lookup as every mutating command: limit 5 so the exact
+			// customId match is findable among semantic near-neighbours.
+			// With the old limit of 1, a similarly-named file ranking first
+			// made this return the wrong file's contents as a success.
+			const readResult = await this.getFileDocument(filePath)
+			if (!readResult.success || !readResult.document) {
 				return {
 					success: false,
-					error: `File not found: ${filePath}`,
+					error: readResult.error || `File not found: ${filePath}`,
 				}
 			}
 
-			let content = document.content || ""
+			const document = readResult.document
+
+			let content: string = document.raw || document.content || ""
 
 			// Apply line range if specified
 			if (viewRange) {
 				const lines = content.split("\n")
 				const [startLine, endLine] = viewRange
-				const selectedLines = lines.slice(startLine - 1, endLine)
+				// `endLine === -1` is the documented sentinel for "read to the end
+				// of the file" (same convention as Anthropic's text-editor tool).
+				// Passing it straight to Array.slice would be interpreted as a
+				// from-the-end index and silently drop the final line, so map any
+				// negative end to the array length.
+				const sliceEnd = endLine < 0 ? lines.length : endLine
+				const selectedLines = lines.slice(startLine - 1, sliceEnd)
 
 				// Format with line numbers
 				const numberedLines = selectedLines.map(
@@ -329,7 +331,7 @@ export class ClaudeMemoryTool {
 		try {
 			const normalizedId = this.normalizePathToCustomId(filePath)
 
-			const response = await this.client.memories.add({
+			const _response = await this.client.add({
 				content: fileText,
 				customId: normalizedId,
 				containerTags: this.containerTags,
@@ -383,12 +385,14 @@ export class ClaudeMemoryTool {
 				}
 			}
 
-			// Replace the string
-			const newContent = originalContent.replace(oldStr, newStr)
+			// Replace the string. The function replacer keeps `$` sequences
+			// in the replacement literal — a bare string here would expand
+			// patterns like $&, $', and $` and silently corrupt the file.
+			const newContent = originalContent.replace(oldStr, () => newStr)
 
 			// Update the document
 			const normalizedId = this.normalizePathToCustomId(filePath)
-			const updateResponse = await this.client.memories.add({
+			const _updateResponse = await this.client.add({
 				content: newContent,
 				customId: normalizedId,
 				containerTags: this.containerTags,
@@ -447,7 +451,7 @@ export class ClaudeMemoryTool {
 
 			// Update the document
 			const normalizedId = this.normalizePathToCustomId(filePath)
-			await this.client.memories.add({
+			await this.client.add({
 				content: newContent,
 				customId: normalizedId,
 				containerTags: this.containerTags,
@@ -484,9 +488,9 @@ export class ClaudeMemoryTool {
 				}
 			}
 
-			// Delete using the document ID
-			// Note: We'll need to implement this based on supermemory's delete API
-			// For now, we'll return a success message
+			const documentId =
+				readResult.document.documentId ?? this.normalizePathToCustomId(filePath)
+			await this.client.documents.delete(documentId)
 
 			return {
 				success: true,
@@ -530,7 +534,7 @@ export class ClaudeMemoryTool {
 			const newNormalizedId = this.normalizePathToCustomId(newPath)
 
 			// Create new document with new path
-			await this.client.memories.add({
+			await this.client.add({
 				content: originalContent,
 				customId: newNormalizedId,
 				containerTags: this.containerTags,
@@ -541,7 +545,14 @@ export class ClaudeMemoryTool {
 				},
 			})
 
-			// Delete the old document (would need proper delete API)
+			// Remove the old document so the previous path stops showing up in
+			// listings and search. Skip when both paths normalize to the same
+			// customId — the add above already replaced the content.
+			const oldNormalizedId = this.normalizePathToCustomId(oldPath)
+			if (oldNormalizedId !== newNormalizedId) {
+				const oldDocumentId = readResult.document.documentId ?? oldNormalizedId
+				await this.client.documents.delete(oldDocumentId)
+			}
 
 			return {
 				success: true,
@@ -573,11 +584,12 @@ export class ClaudeMemoryTool {
 				includeFullDocs: true,
 			})
 
-			// Try to find exact match by customId first
-			const exactMatch = response.results?.find(
+			// Only accept the exact customId match. Falling back to the top
+			// semantic hit would let callers read — and worse, modify or
+			// delete — a different file than the one they asked for.
+			const document = response.results?.find(
 				(r) => r.documentId === normalizedId,
 			)
-			const document = exactMatch || response.results?.[0]
 
 			if (!document) {
 				return {
