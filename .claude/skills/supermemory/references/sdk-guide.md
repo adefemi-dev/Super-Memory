@@ -490,7 +490,7 @@ const { text } = await generateText({
 
 Tools: `searchMemories`, `addMemory`, `getProfile`, `documentList`, `documentAdd`, `documentDelete`, `memoryForget`.
 
-Use `searchMemories` for targeted hybrid recall; `getProfile` for broad static/dynamic user context; `documentList`, `documentAdd`, and `documentDelete` for source management. Hybrid search returns both extracted memories and source-document chunks.
+Use `searchMemories` for targeted recall — note it calls the legacy chunk/document search (`client.search.execute`) here, returning document/chunk results rather than extracted memory entries with forgettable IDs; use query-backed `getProfile` when you need a memory ID. `getProfile` also covers broad static/dynamic user context; `documentList`, `documentAdd`, and `documentDelete` handle source management.
 
 If you configure multiple container tags, `searchMemories`, `getProfile`, and `memoryForget` use the first tag because v4 memory operations are single-space. Add, list, and delete operations use the broader configured scope where supported.
 

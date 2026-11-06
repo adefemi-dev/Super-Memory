@@ -147,7 +147,7 @@ Supermemory supports two complementary integration styles:
 
 | Tool | Use when |
 |------|----------|
-| `searchMemories` / `search_memories` | Proactive hybrid recall before answering when user-specific context could help — not only when explicitly asked. Hybrid returns both memory entries and source-document chunks. |
+| `searchMemories` / `search_memories` | Proactive recall before answering when user-specific context could help — not only when explicitly asked. In this codebase it calls the legacy chunk/document search (`client.search.execute`), returning document/chunk results, not extracted memory entries with forgettable IDs. |
 | `addMemory` / `add_memory` | Store a single generalizable fact the user stated |
 | `getProfile` / `get_profile` | Load static + dynamic profile; pass `query` to scope search results to the current topic |
 | `documentList` / `document_list` | Browse stored **source documents** (conversations, URLs, files); returns **document IDs** |
@@ -161,17 +161,17 @@ Agents must pick the right removal path:
 
 | User intent | Tool | What it removes | ID source |
 |-------------|------|-----------------|-----------|
-| "Forget that I like tea" / correct a wrong fact | `memoryForget` | One extracted profile memory (soft delete) | Memory ID from a search result that contains `memory`, or query-backed `getProfile.searchResults` / `get_profile.search_results` |
+| "Forget that I like tea" / correct a wrong fact | `memoryForget` | One extracted profile memory (soft delete) | Memory ID from query-backed `getProfile.searchResults` / `get_profile.search_results` (an item containing `memory`) |
 | "Delete that conversation" / remove a whole file or URL | `documentDelete` | Source document permanently; extracted memories are soft-forgotten | `documentId` from `documentList` |
-| User is vague ("forget what you know about my job") | `searchMemories` first → then `memoryForget` | Same as memoryForget | Search first, then use `memoryId` |
+| User is vague ("forget what you know about my job") | `getProfile` with a `query` first → then `memoryForget` | Same as memoryForget | Query-backed profile search first, then use `memoryId` |
 
-**Do not confuse IDs:** `memoryId` ≠ `documentId`. In hybrid results, only an item containing `memory` has a forgettable memory ID; an item containing `chunk` has a chunk ID. Static/dynamic profile entries are plain text, so use query-backed profile search results when you need an ID.
+**Do not confuse IDs:** `memoryId` ≠ `documentId`. `searchMemories` / `search_memories` returns document/chunk results from the legacy search endpoint — it does not carry forgettable memory IDs. Only `getProfile`'s query-backed `searchResults` (an item containing `memory`) gives you a memory ID to pass to `memoryForget`; an item containing `chunk` has a chunk ID instead. Static/dynamic profile entries are plain text with no ID at all.
 
 **Soft vs hard delete:** `memoryForget` hides a fact from profile/search but leaves source documents. `documentDelete` permanently removes the underlying source and soft-forgets its extracted memories.
 
 **When to use profile vs search vs documents:**
 - **`profile()` / `getProfile`**: Broad user context (static facts + recent dynamic memories). Use before responses when you want a holistic view of the user.
-- **`search()` / `searchMemories`**: Targeted recall — use proactively before answering when memory could improve the response, not only when the user says "search" or "what do you remember". Hybrid mode returns both extracted memories and source-document chunks.
+- **`search()` / `searchMemories`**: Targeted recall — use proactively before answering when memory could improve the response, not only when the user says "search" or "what do you remember". The SDK's `search()` v4 call supports hybrid mode (memories + source-document chunks), but the `searchMemories` agent tool in this codebase calls the legacy chunk/document search instead, so don't rely on it for memory IDs.
 - **`documents.*`**: Source management — list, add, or delete documents throughout their lifecycle.
 
 With multiple configured container tags, `searchMemories`, `getProfile`, and `memoryForget` use the first tag because v4 memory operations are single-space. Add, list, and delete operations use the broader configured scope where supported.
@@ -197,10 +197,10 @@ tools = SupermemoryTools(
     os.environ["SUPERMEMORY_API_KEY"],
     {"container_tags": ["user_123"]},
 )
-definitions = tools.get_tool_definitions()  # all 7 tools
+definitions = tools.get_tool_definitions()  # search_memories, add_memory only
 ```
 
-Filter `definitions` before passing them to a model if it should not be able to call `document_delete` or `memory_forget`.
+The Python package (`supermemory-openai-sdk`) currently implements only `search_memories` and `add_memory`. `getProfile`, `documentList`, `documentAdd`, `documentDelete`, and `memoryForget` are TypeScript-only (`@supermemory/tools/ai-sdk`) in this codebase — there's nothing to filter out on the Python side yet.
 
 **For Chatbots**: Use middleware (`withSupermemory` / `with_supermemory`) for automatic context injection, or pass tools to the model for explicit memory control
 
